@@ -1,30 +1,25 @@
--- // cache
+-- // cache 
 local Circle = Drawing.new("Circle")
 local rPoint
-local localPlayer = game.Players.LocalPlayer
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local Players = game:GetService("Players")
+local localPlayer = Players.LocalPlayer
+local character = localPlayer.Character or localPlayer.CharacterAdded:Wait()
+local cam = workspace.CurrentCamera
+local camLock = false
+local targetPlayer = nil
+local cameraSpeed = Trace.Smoothness
+local predictionFactor = Trace.Prediction
 local mouse = localPlayer:GetMouse()
-local mousePos = mouse.hit.p
-local playersService = game:GetService("Players")
-local workspaceCam = workspace.CurrentCamera;
-local CFramelookat = CFrame.lookAt
-local v3 = Vector3.new
-local Player = game:GetService("Players").LocalPlayer
-local Mouse = Player:GetMouse()
-local SpeedGlitch = false
 
-Circle.Transparency = fabric.FOV.Transparency
-Circle.Radius = fabric.FOV.Size * 3
-Circle.Visible = fabric.FOV.Enabled
-Circle.Color = fabric.FOV.Color
-Circle.Thickness = fabric.FOV.Thickness
-Circle.Filled = fabric.FOV.Filled
+Circle.Transparency = 1
+Circle.Radius = FOV.Size * 3
+Circle.Visible = FOV.Enabled
+Circle.Color = FOV.Color
+Circle.Thickness = 1
 
-local positionData = {}
-local velocityCache = {}
-local smoothingFactor = 30
-local smoothingFactorMax = 100
-local prevVelocity = Vector3.new()
-
+local smoothingFactor, positionData, currentIndex = 30, {}, 1
 local function calculateVelocityAverage(positionData)
 	local totalVelocity = 0
 	local avgPosition = Vector3.new()
@@ -33,93 +28,74 @@ local function calculateVelocityAverage(positionData)
 	if len == 0 then
 		return avgPosition, avgTime
 	end
-	for i, data in ipairs(positionData) do
-		if data.pos then
-			local velocity = velocityCache[i] or (1 - (i - 1) / smoothingFactorMax) ^ 2
-			velocityCache[i] = velocity
+	for i = 1, len do
+		local data = positionData[i]
+		if data and data.pos then
+			local velocity = smoothingFactor - i + 1
 			avgPosition += data.pos * velocity
 			avgTime += data.time * velocity
 			totalVelocity += velocity
 		end
 	end
-	return avgPosition / totalVelocity, avgTime / totalVelocity
+	avgPosition = avgPosition / totalVelocity
+	avgTime = avgTime / totalVelocity
+	return avgPosition, avgTime
 end
-
-local function smoothVelocity(character, smoothingFactor)
+local function smoothVelocity(character)
 	local currentPos = character.HumanoidRootPart.Position
 	local currentTick = tick()
-	positionData[# positionData + 1] = {
+	positionData[currentIndex] = {
 		pos = currentPos,
 		time = currentTick
 	}
-	if # positionData > smoothingFactorMax then
-		table.remove(positionData, 1)
-	end
+	currentIndex = (currentIndex % smoothingFactor) + 1
 	local avgPosition, avgTime = calculateVelocityAverage(positionData)
-	local prevData = positionData[# positionData - 1]
+	local prevData = positionData[currentIndex]
 	if prevData and prevData.pos then
-		local avgVelocity = (avgPosition - prevData.pos) / (avgTime - prevData.time)
-		local smoothedVelocity = (1 - 1 / smoothingFactor) * prevVelocity + 1 / smoothingFactor * avgVelocity
-		prevVelocity = smoothedVelocity
-		return smoothedVelocity
+		local Velocity = (currentPos - prevData.pos) / (currentTick - prevData.time)
+		return Velocity
 	end
 end
 
+-- // auto pred (based off your normal pred)
 local function getPingBasedPrediction()
-	if fabric.Misc.AutoPrediction then
+	if dnss.test.AutoPrediction then
 		local ping = game:GetService("Stats").Network.ServerStatsItem["Data Ping"]:GetValue()
 		local calculatedPrediction = (((ping - 0) / 200) * (0.2 - 0.1)) + 0.1
-		return fabric.SilentAim.Prediction + calculatedPrediction
+		return dnss.test.Prediction + calculatedPrediction
 	else
-		return fabric.SilentAim.Prediction
+		return dnss.test.Prediction
 	end
 end
 
+-- // Mem spoofer
 pcall(function()
 	local spoofer, updating = false
-	local performanceStats = game:GetService('CoreGui').RobloxGui.PerformanceStats
-	local function updateChildNames()
-		for i, v in ipairs(performanceStats:GetChildren()) do
-			v.Name = i
-		end
+	for i, v in pairs(game:GetService("CoreGui").RobloxGui.PerformanceStats:GetChildren()) do
+		v.Name = i
 	end
-	local function updateValueLabelText()
-		if fabric.MemSpoofer.Enabled and not updating then
+	game:GetService("CoreGui").RobloxGui.PerformanceStats["1"].StatsMiniTextPanelClass.ValueLabel:GetPropertyChangedSignal("Text"):Connect(function()
+		if not updating then
 			updating = true
-			spoofer = string.format('%d.%dMB', math.random(MemSpoofer.Start, MemSpoofer.End), math.random(10, 99))
-			performanceStats['1'].StatsMiniTextPanelClass.ValueLabel.Text = spoofer
+			spoofer = math.random(800, 900) .. "." .. math.random(10, 99) .. "MB" -- // you can make a toggle if you want
+			game:GetService("CoreGui").RobloxGui.PerformanceStats["1"].StatsMiniTextPanelClass.ValueLabel.Text = spoofer
 			updating = false
 		end
-	end
-	local function onDataChange()
-		updateChildNames()
-		updateValueLabelText()
-	end
-	updateChildNames()
-	performanceStats['1'].StatsMiniTextPanelClass.ValueLabel:GetPropertyChangedSignal('Text'):Connect(onDataChange)
+	end)
 end)
 
 function wallCheck(position, ignoreList)
-	if fabric.Checks.wallCheck then
-		return not workspace:FindPartOnRayWithIgnoreList(
-		Ray.new(workspace.CurrentCamera.CFrame.p, position - workspace.CurrentCamera.CFrame.p), ignoreList)
-	end
+	return not workspace:FindPartOnRayWithIgnoreList(Ray.new(workspace.CurrentCamera.CFrame.p, position - workspace.CurrentCamera.CFrame.p), ignoreList)
 end
 
 function KnockedCheck(_)
-	if _.Character.BodyEffects["K.O"] and fabric.Checks.KOCheck then
+	if _.Character.BodyEffects["K.O"] and Checks.KOCheck then
 		return _.Character.BodyEffects["K.O"].Value ~= true
 	end
-end
-
-function GrabbedCheck(_)
-	if fabric.Checks.GrabbedCheck then
-		return not _.Character:FindFirstChild("GRABBING_CONSTRAINT")
-	end
-end
+end 
 
 function isSameCrew(Player1, Player2)
-	if fabric.Checks.CrewCheck and Player1:FindFirstChild("DataFolder") and Player1.DataFolder:FindFirstChild("Information") and Player1.DataFolder.Information:FindFirstChild("Crew") and Player2:FindFirstChild("DataFolder") and Player2.DataFolder:FindFirstChild("Information") and Player2.DataFolder.Information:FindFirstChild("Crew") then
+	if Checks.CrewCheck and Player1:FindFirstChild("DataFolder") and Player1.DataFolder:FindFirstChild("Information") and Player1.DataFolder.Information:FindFirstChild("Crew") and Player2:FindFirstChild("DataFolder") and Player2.DataFolder:FindFirstChild("Information") and Player2.DataFolder.Information:FindFirstChild("Crew") then
 		local Player1Crew = Player1.DataFolder.Information.Crew.Value
 		local Player2Crew = Player2.DataFolder.Information.Crew.Value
 		if Player1Crew ~= nil and Player2Crew ~= nil and Player1Crew ~= "" and Player2Crew ~= "" then
@@ -129,153 +105,282 @@ function isSameCrew(Player1, Player2)
 	return false
 end
 
+function GrabbedCheck(_)
+	if Checks.GrabbedCheck then
+		return not _.Character:FindFirstChild("GRABBING_CONSTRAINT")
+	end
+end
+
 local userInputService = game:GetService("UserInputService")
 userInputService.InputBegan:Connect(function(input, gameProcessedEvent)
-	if input.KeyCode.Name == fabric.SilentAim.ToggleKey and not gameProcessedEvent then
-		fabric.SilentAim.Enabled = not fabric.SilentAim.Enabled
+	if input.KeyCode.Name == dnss.test.ToggleKey and not gameProcessedEvent then
+		dnss.test.Enabled = not dnss.test.Enabled
 	end
 end)
 
 function getClosestPart(Target)
 	if Target and Target:GetChildren() then
 		local closestpart, closdist = nil, math.huge
-		local camera = workspace.CurrentCamera
-		local mousepos = game.Players.LocalPlayer:GetMouse()
-		local circleRadius = Circle.Radius
-		local children = Target:GetChildren()
-		local i = 1
-		while i <= #children do
-			local child = children[i]
+		for _, child in ipairs(Target:GetChildren()) do
 			if child:IsA("BasePart") then
-				local them, vis = camera:WorldToScreenPoint(child.Position)
+				local ting = child
+				local them, vis = workspace.CurrentCamera:WorldToScreenPoint(ting.Position)
+				local mousepos = game.Players.LocalPlayer:GetMouse()
 				local magnitude = (Vector2.new(them.X, them.Y) - Vector2.new(mousepos.X, mousepos.Y)).magnitude
-				if vis and circleRadius > magnitude and magnitude < closdist then
-					closestpart, closdist = child, magnitude
+				if vis and Circle.Radius > magnitude and magnitude < closdist then
+					closestpart, closdist = ting, magnitude
 				end
 			end
-			i = i + 1
 		end
 		return closestpart
 	end
 end
 
-function closestPointOnPart(part, point)
-	local cf = part.CFrame
-	local extent = part.Size / 2
-	local diff = point - cf.p
-	local closestPoint = Vector3.new(
-	math.clamp(diff.x, - extent.x, extent.x), math.clamp(diff.y, - extent.y, extent.y), math.clamp(diff.z, - extent.z, extent.z))
-	return cf:pointToWorldSpace(closestPoint)
-end
-
+-- // Closest point
+local prevClosestPtOnPart, prevClosestPtOffPart, prevClampedPos
 function cls(target)
-	local SelectedPart = getClosestPart(self.Character)
-	if SelectedPart then
-		local MouseHit = game.Players.LocalPlayer:GetMouse().hit
-		return closestPointOnPart(SelectedPart, MouseHit.p)
+	local selPart = getClosestPart(target)
+	if not selPart or not target then
+		return nil, nil
 	end
+	local mouse = game.Players.LocalPlayer:GetMouse()
+	local mousePos, mouseTarget = mouse.hit.p, mouse.Target
+	local dirToPart = (selPart.Position - mousePos).unit
+	local halfSize = selPart.Size / 2
+	local ptOnPart = selPart.Position - dirToPart * halfSize
+	local ptOffPart = mousePos
+	if mouseTarget and mouseTarget:IsDescendantOf(target) then
+		ptOnPart, ptOffPart = mousePos, ptOnPart + dirToPart * (halfSize * 2)
+	end
+	local newPos = Vector3.new(
+    math.clamp(ptOnPart.X, selPart.Position.X - halfSize.X, selPart.Position.X + halfSize.X), math.clamp(ptOnPart.Y, selPart.Position.Y - halfSize.Y, selPart.Position.Y + halfSize.Y), math.clamp(ptOnPart.Z, selPart.Position.Z - halfSize.Z, selPart.Position.Z + halfSize.Z))
+	prevClosestPtOnPart, prevClosestPtOffPart = ptOnPart, ptOffPart
+	prevClampedPos = newPos
+	return newPos, ptOffPart
 end
 
 function getClosestPlayer()
-    local closestPlayer, closestDistance = nil, 1 / 0
-    local camera = workspace.CurrentCamera
-    local localPlayer = game.Players.LocalPlayer
-    local mouse = localPlayer:GetMouse()
-    local mousePos = mouse.hit.p
-    local players = game:GetService("Players"):GetPlayers()
-    -- Define or pass variables for the following functions
-    local knockedCheck = KnockedCheck
-    local grabbedCheck = GrabbedCheck
-    local wallCheck = wallCheck
-    local isSameCrew = isSameCrew
-    local i = 1
-    while i <= #players do
-        local player = players[i]
-        if player ~= localPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
-            local rootPart = player.Character.HumanoidRootPart
-            local OnScreen = camera:WorldToViewportPoint(rootPart.Position)
-            local distance = (rootPart.Position - mousePos).magnitude
-            if distance < closestDistance
-                    and knockedCheck(player)
-                    and grabbedCheck(player)
-                    and OnScreen
-                    and wallCheck(rootPart.Position, { localPlayer, player.Character })
-                    and not isSameCrew(localPlayer, player) then
-                closestPlayer = player
-                closestDistance = distance
-            end
-        end
-        i = i + 1
-    end
-    return closestPlayer
+	local closestPlayer, closestDistance = nil, math.huge
+	local Mouse = game.Players.LocalPlayer:GetMouse()
+	local mousePos = Mouse.hit.p
+	local localPlayer = game.Players.LocalPlayer
+	for _, player in ipairs(game:GetService("Players"):GetPlayers()) do
+		if player ~= localPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+			local distance = (player.Character.HumanoidRootPart.Position - mousePos).magnitude
+			if not closestDistance or distance < closestDistance then
+				local vis = workspace.CurrentCamera:WorldToViewportPoint(player.Character.HumanoidRootPart.Position)
+				if KnockedCheck(player) and GrabbedCheck(player) and vis and wallCheck(player.Character.UpperTorso.Position, {
+					localPlayer,
+					player.Character
+				}) and not isSameCrew(localPlayer, player) then
+					closestPlayer = player
+					closestDistance = distance
+				end
+			end
+		end
+	end
+	return closestPlayer
 end
 
-local function AntiGroundShots()
-	if self ~= nil and fabric.AntiGroundShots.Enabled and self.Character.Humanoid:GetState() == Enum.HumanoidStateType.Freefall then
-			local currentvelocity = self.Character.HumanoidRootPart.Velocity
-			self.Character.HumanoidRootPart.Velocity = Vector3.new(currentvelocity.X, currentvelocity.Y / fabric.AntiGroundShots.TakeOff, currentvelocity.Z)
-	end
+if self ~= nil and dnss.test.AntiGroundShots and self.Character.Humanoid.FloorMaterial == Enum.Material.Air then
+	game.RunService.Stepped:Connect(function()
+		local currentvelocity = self.Character.HumanoidRootPart.Velocity
+		self.Character.HumanoidRootPart.Velocity = Vector3.new(currentvelocity.X, currentvelocity.Y / dnss.test.TakeOff, currentvelocity.Z)
+	end)
 end
 
 function isAnti()
 	local calculateVelocityAverage = smoothVelocity(self.Character)
-	return self.Character.HumanoidRootPart.Velocity.Magnitude > 50 and calculateVelocityAverage * fabric.SilentAim.Prediction or self.Character.HumanoidRootPart.Velocity * fabric.SilentAim.Prediction
+	return self.Character.HumanoidRootPart.Velocity.Magnitude > 50 and calculateVelocityAverage * dnss.test.Prediction or self.Character.HumanoidRootPart.Velocity * dnss.test.Prediction
 end
-function AntiCurve()
-    local character = game.Players.LocalPlayer.Character
-    if fabric.Misc.AntiCurve and character and character.PrimaryPart then
-        local characterCf = character.PrimaryPart.CFrame
-        local target = self.Character.HumanoidRootPart
-        local targetPos = target.Position
-        local charPos = character.PrimaryPart.Position
-        character:SetPrimaryPartCFrame(CFrame.lookAt(charPos, v3(targetPos.X, charPos.Y, targetPos.Z)))
-        wait()
-        character:SetPrimaryPartCFrame(characterCf)
-    end
+
+function isAnti2()
+	local calculateVelocityAverage = smoothVelocity(self.Character)
+	return self.Character.HumanoidRootPart.Velocity.Magnitude > 50 and calculateVelocityAverage * Trace.Prediction or self.Character.HumanoidRootPart.Velocity * Trace.Prediction
 end
 
 game.RunService.Heartbeat:Connect(function()
-	local vector2Pos = game:GetService("UserInputService"):GetMouseLocation()
-	Circle.Position = Vector2.new(vector2Pos.X, vector2Pos.Y)
-	AntiCurve()
-	AntiGroundShots()
-	getPingBasedPrediction()
-	if fabric.SilentAim.Enabled then
+	local pos = game:GetService("UserInputService"):GetMouseLocation()
+	Circle.Position = Vector2.new(pos.X, pos.Y)
+	if dnss.test.Enabled and self then
+		rPoint = cls(self.Character)
+		getgenv().Result = getClosestPart(self.Character)
+	end
+	if dnss.test.Enabled then
 		self = getClosestPlayer()
-		if self then
-			rPoint = cls(self.Character)
-			getgenv().Result = getClosestPart(self.Character)
-		else
-			rPoint = nil
-			getgenv().Result = nil
-		end
-	else
-		rPoint = nil
 	end
 end)
 
-local function processInput(Key)
-	if Key == string.lower(fabric.Macro.Key) and fabric.Macro.Enabled then
-		SpeedGlitch = not SpeedGlitch
-		if SpeedGlitch == true then
-			repeat
-				task.wait(fabric.Macro.Speed / 100)
-				if fabric.Macro.Type == "Keyboard" then
-					game:GetService("VirtualInputManager"):SendKeyEvent(true, "I", false, game)
-					task.wait(fabric.Macro.Speed / 100)
-					game:GetService("VirtualInputManager"):SendKeyEvent(true, "O", false, game)
-				elseif fabric.Macro.Type == "Mouse" then
-					game:GetService("VirtualInputManager"):SendMouseWheelEvent("0", "0", true, game)
-					task.wait(fabric.Macro.Speed / 100)
-					game:GetService("VirtualInputManager"):SendMouseWheelEvent("0", "0", false, game)
+local function isPlayerVisible(player)
+	local ray = Ray.new(cam.CFrame.p, (player.Character.HumanoidRootPart.Position - cam.CFrame.p).unit * (player.Character.HumanoidRootPart.Position - cam.CFrame.p).magnitude)
+	local ignoreList = {localPlayer.Character,player.Character}
+	return workspace:FindPartOnRayWithIgnoreList(ray, ignoreList) == nil
+end
+
+local function isPlayerOnScreen(player)
+	local playerCharacter = player.Character
+	if not playerCharacter or not playerCharacter:FindFirstChild("HumanoidRootPart") then
+		return false
+	end
+	return cam:WorldToViewportPoint(playerCharacter.HumanoidRootPart.Position)
+end
+
+local function isTargetValid(target)
+	if not target or not target.Character or not target.Character:FindFirstChild("Humanoid") then
+		return false
+	end
+	local humanoid = target.Character.Humanoid
+	if humanoid.Health <= 0 then
+		return false
+	end
+	local kocheck = target.Character.BodyEffects:FindFirstChild("K.O") and target.Character.BodyEffects["K.O"].Value
+	local grabbed = target.Character:FindFirstChild("GRABBING_CONSTRAINT") ~= nil
+	if kocheck or grabbed then
+		return false
+	end
+	return true
+end
+
+local function getClosestPlayercam()
+	local closestPlayer, closestDistance = nil, Circle.Radius  -- // got lazy
+	for _, player in ipairs(game:GetService("Players"):GetPlayers()) do
+		if player ~= localPlayer and isPlayerOnScreen(player) and isPlayerVisible(player) then
+			local playerCharacter = player.Character
+			if playerCharacter and playerCharacter:FindFirstChild("HumanoidRootPart") then
+				local distance = (playerCharacter.HumanoidRootPart.Position - localPlayer.Character.HumanoidRootPart.Position).magnitude
+				if distance < closestDistance then
+					closestPlayer, closestDistance = player, distance
 				end
-				task.wait(fabric.Macro.Speed / 100)
-			until SpeedGlitch == false
+			end
 		end
+	end
+	return closestPlayer
+end
+
+local function toggleCamLock()
+	camLock = not camLock
+	if camLock then
+		targetPlayer = getClosestPlayercam()
+	end
+end
+        
+local function onInputBegan(input, gameProcessedEvent)
+	if gameProcessedEvent then
+		return
+	end
+	if input.KeyCode.Name == Trace.Key then
+		toggleCamLock()
 	end
 end
 
-Mouse.KeyDown:Connect(processInput)
+-- // cache
+EaseStyle = Trace.EaseStyle
+EaseStyleType = Trace.EaseStyleType
+shake = Trace.Shake
+shakeIntensity = Trace.shakeIntensity
+UseDirection = Trace.UseDirection 
+Direction = Trace.Direction
+
+local function getEaseStyleValue(progress)
+    if not EaseStyle then
+        return progress
+    end
+    local easeValue
+    if EaseStyleType == "Linear" then
+        easeValue = progress
+    elseif EaseStyleType == "Sine" then
+        easeValue = 1 - math.cos((progress * math.pi) / 2)
+    elseif EaseStyleType == "Back" then
+        local overshoot = 1.70158
+        easeValue = progress * progress * ((overshoot + 1) * progress - overshoot)
+    elseif EaseStyleType == "Quad" then
+        easeValue = progress * progress
+    elseif EaseStyleType == "Quart" then
+        easeValue = progress * progress * progress * progress
+    elseif EaseStyleType == "Quint" then
+        easeValue = progress * progress * progress * progress * progress
+    elseif EaseStyleType == "Bounce" then
+        local function bounce(t)
+            if t < 1 / 2.75 then
+                return 7.5625 * t * t
+            elseif t < 2 / 2.75 then
+                t = t - 1.5 / 2.75
+                return 7.5625 * t * t + 0.75 -- // im a fucking math nerd but i have f's in school
+            elseif t < 2.5 / 2.75 then
+                t = t - 2.25 / 2.75
+                return 7.5625 * t * t + 0.9375
+            else
+                t = t - 2.625 / 2.75
+                return 7.5625 * t * t + 0.984375
+            end
+        end
+        easeValue = 1 - bounce(1 - progress)
+    elseif EaseStyleType == "Elastic" then
+        local period = 0.3
+        local s = period / (2 * math.pi) * math.asin(1)
+        easeValue = -(2 ^ (-10 * progress) * math.sin((progress - s) * (2 * math.pi) / period))
+    elseif EaseStyleType == "Exponential" then
+        easeValue = 1 - math.exp(-5 * progress)
+    elseif EaseStyleType == "Circular" then
+        easeValue = 1 - math.sqrt(1 - progress * progress)
+    elseif EaseStyleType == "Cubic" then
+        easeValue = progress * progress * progress
+    end -- // fuck you roblox i remade your shit in 10 mins
+    if UseDirection then
+        if Direction == "In" then
+            -- // its default is in
+        elseif Direction == "Out" then
+            easeValue = 1 - easeValue
+        elseif Direction == "InOut" then
+            if progress < 0.5 then
+                easeValue = easeValue / 2
+            else
+                easeValue = 1 - (1 - easeValue) / 2
+            end
+        end
+    end
+    return easeValue
+end
+
+local function applyShake(cFrame)
+    if shake then
+        local x = math.random(-shakeIntensity.SX, shakeIntensity.SX) / 300 -- // random number change it to whatever
+        local y = math.random(-shakeIntensity.SY, shakeIntensity.SY) / 300
+        local z = math.random(-shakeIntensity.SZ, shakeIntensity.SZ) / 300
+        return cFrame * CFrame.new(x, y, z)
+    else
+        return cFrame
+    end
+end
+
+local function onRenderStep()
+    if not camLock then
+        return
+    end
+    if not targetPlayer or (targetPlayer and not targetPlayer.Character) or not targetPlayer.Character:FindFirstChild(Trace.AimPart) then
+        return
+    end
+    if Trace.Enabled then
+        if not isTargetValid(targetPlayer) then
+            targetPlayer = nil
+            return
+        end
+        local targetPosition = targetPlayer.Character.HumanoidRootPart.Position
+        local targetVelocity = isAnti2()
+        local predictedPosition = targetPosition + targetVelocity
+        local targetCFrame = CFrame.new(cam.CFrame.p, predictedPosition)
+        local newPosition = cam.CFrame.p:Lerp(targetCFrame.p, getEaseStyleValue(cameraSpeed))
+        local newLookVector = cam.CFrame.LookVector:Lerp(targetCFrame.LookVector, getEaseStyleValue(cameraSpeed))
+        local newCFrame = CFrame.lookAt(newPosition, newPosition + newLookVector)
+        local controlPoint = (cam.CFrame.p + targetCFrame.p) * 0.5
+        newPosition = (1 - getEaseStyleValue(cameraSpeed)) * ((1 - getEaseStyleValue(cameraSpeed)) * cam.CFrame.p + getEaseStyleValue(cameraSpeed) * controlPoint) + getEaseStyleValue(cameraSpeed) * ((1 - getEaseStyleValue(cameraSpeed)) * controlPoint + getEaseStyleValue(cameraSpeed) * targetCFrame.p)
+        cam.CFrame = applyShake(CFrame.lookAt(newPosition, newPosition + newLookVector))
+    end
+end
+
+UserInputService.InputBegan:Connect(onInputBegan)
+RunService.RenderStepped:Connect(onRenderStep)
+
 
 local __index
 __index = hookmetamethod(game, "__index", function(t, k)
